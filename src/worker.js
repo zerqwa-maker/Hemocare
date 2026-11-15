@@ -21,6 +21,36 @@ async function api(request, env, url) {
     catch (e) { databaseError = e?.name || 'DatabaseError'; }
     return json({databaseConnected:!!env.DB,databaseTables,databaseError,vapidPublicKeyPresent:!!env.VAPID_PUBLIC_KEY,vapidPrivateKeyPresent:!!env.VAPID_PRIVATE_KEY,webpushSetVapidDetails:typeof webpush.setVapidDetails,webpushSendNotification:typeof webpush.sendNotification,storageVersion:2,vapidKeyPairMatch:(()=>{try{const privateBytes=Buffer.from(env.VAPID_PRIVATE_KEY || '', 'base64url');const publicBytes=Buffer.from(env.VAPID_PUBLIC_KEY || '', 'base64url');if(privateBytes.length!==32 || publicBytes.length!==65)return false;const ecdh=createECDH('prime256v1');ecdh.setPrivateKey(privateBytes);return ecdh.getPublicKey().equals(publicBytes);}catch(e){console.error('VAPID pair verification failed',e?.name);return false;}})()});
   }
+  if (url.pathname === '/api/cloud-vault') {
+    if (!corsSafe(request)) return json({error:'Origin not allowed'},403);
+    if (!['GET','PUT'].includes(request.method)) return json({error:'Method not allowed'},405);
+    if (!env.DB) return json({error:'Database unavailable'},503);
+    // The 256-bit random vault identifier is a bearer capability; never log it.
+    const id=request.headers.get('X-Vault-Key');
+    if (typeof id!=='string' || !/^[a-f0-9]{64}$/.test(id)) return json({error:'Invalid vault recovery code'},400);
+    if (request.method==='GET') {
+      const row=await env.DB.prepare('SELECT ciphertext,updated_at,revision FROM hemocare_encrypted_vaults WHERE vault_id=?').bind(id).first();
+      return row ? json({backup:JSON.parse(row.ciphertext),updatedAt:row.updated_at,revision:row.revision}) : json({error:'Cloud copy not found'},404);
+    }
+    if (Number(request.headers.get('content-length')||0)>2500000) return json({error:'Cloud copy too large'},413);
+    const raw=await request.text();
+    if (raw.length>2500000) return json({error:'Cloud copy too large'},413);
+    let body;try{body=JSON.parse(raw)}catch{return json({error:'Invalid JSON'},400)}
+    const b=body?.backup;
+    if (!b || b.format!=='hemocare-encrypted-backup' || b.version!==2 || b.kdf!=='PBKDF2-SHA256' || b.iterations!==310000 || b.cipher!=='AES-256-GCM' || typeof b.salt!=='string' || !/^[A-Za-z0-9+/]{22}==$/.test(b.salt) || typeof b.iv!=='string' || !/^[A-Za-z0-9+/]{16}$/.test(b.iv) || typeof b.data!=='string' || !/^[A-Za-z0-9+/=]+$/.test(b.data) || b.data.length>2300000) return json({error:'Invalid encrypted backup'},400);
+    const existing=await env.DB.prepare('SELECT revision FROM hemocare_encrypted_vaults WHERE vault_id=?').bind(id).first();
+    if (existing && body.expectedRevision!==existing.revision) return json({error:'Cloud copy changed. Download it before overwriting.',revision:existing.revision},409);
+    if (!existing && body.expectedRevision!==0) return json({error:'Cloud copy already changed'},409);
+    const now=Date.now();
+    if (existing) {
+      const result=await env.DB.prepare('UPDATE hemocare_encrypted_vaults SET ciphertext=?,updated_at=?,revision=revision+1 WHERE vault_id=? AND revision=?').bind(JSON.stringify(b),now,id,existing.revision).run();
+      if (result.meta?.changes!==1) return json({error:'Cloud copy changed'},409);
+    } else {
+      try{await env.DB.prepare('INSERT INTO hemocare_encrypted_vaults(vault_id,ciphertext,updated_at,revision) VALUES(?,?,?,1)').bind(id,JSON.stringify(b),now).run()}
+      catch{return json({error:'Cloud copy already exists'},409)}
+    }
+    return json({ok:true,updatedAt:now,revision:(existing?.revision||0)+1});
+  }
   if (url.pathname === '/api/health' && request.method === 'GET') return json({ok:true, app:'HemoCare', database:!!env.DB, vapidPublicKey:!!env.VAPID_PUBLIC_KEY, vapidPrivateKey:!!env.VAPID_PRIVATE_KEY, push:'configured'});
   if ((url.pathname === '/api/push-config' || url.pathname === '/api/push/public-key') && request.method === 'GET') return env.VAPID_PUBLIC_KEY ? json({publicKey:env.VAPID_PUBLIC_KEY}) : json({error:'Public key missing'},503);
   if (!['/api/subscribe','/api/reminders','/api/test'].includes(url.pathname)) return null;

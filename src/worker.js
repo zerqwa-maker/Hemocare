@@ -6,7 +6,7 @@ const corsSafe = request => request.headers.get('Origin') === new URL(request.ur
 const payload = (kind, test = false) => ({title: test ? 'HemoCare — проверка' : 'HemoCare — напоминание', body: test ? 'Тестовое уведомление работает.' : kind === 'doctor' ? 'Сегодня запланировано посещение врача.' : kind === 'personal' ? 'У вас запланировано личное напоминание.' : 'Сегодня запланировано напоминание об анализах.', tag: test ? 'hemocare-test' : 'hemocare-reminder'});
 function configure(env) {
   if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY) throw new Error('VAPID keys are not configured');
-  webpush.setVapidDetails('mailto:notifications@hemocare.example', env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY);
+  webpush.setVapidDetails('https://hemocare.zerqwa.workers.dev', env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY);
 }
 async function send(env, subscription, message) {
   configure(env);
@@ -53,7 +53,7 @@ async function api(request, env, url) {
     return json({ok:true,count:items.length});
   }
   try {await send(env,JSON.parse(record.subscription),payload('analysis',true));return json({ok:true});}
-  catch(e) {console.error('HemoCare test push failed',e?.name,e?.message,e?.statusCode);if ([404,410].includes(e?.statusCode)) {try {await env.DB.prepare('DELETE FROM hemocare_push_subscriptions_v2 WHERE device_key=?').bind(key).run();} catch(cleanupError) {console.error('Push subscription cleanup failed',cleanupError?.name,cleanupError?.message);}}return json({error:'Push delivery failed',stage:'push_delivery',reason:e?.name || 'UnknownError',status:e?.statusCode || null},502);}
+  catch(e) {console.error('HemoCare test push failed',e?.name,e?.message,e?.statusCode);if ([404,410].includes(e?.statusCode)) {try {await env.DB.prepare('DELETE FROM hemocare_push_subscriptions_v2 WHERE device_key=?').bind(key).run();} catch(cleanupError) {console.error('Push subscription cleanup failed',cleanupError?.name,cleanupError?.message);}}return json({error:'Push delivery failed',stage:'push_delivery',reason:e?.name || 'UnknownError',status:e?.statusCode || null,detail:String(e?.body || e?.message || '').slice(0,500)},502);}
 }
 export default {
   async fetch(request,env) {

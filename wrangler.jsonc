@@ -1,3 +1,4 @@
+
 {
   "name": "hemocare",
   "main": "src/worker.js",
@@ -5,5 +6,12 @@
   "assets": {
     "directory": "./",
     "binding": "ASSETS"
-  }
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "hemocare-db",
+      "database_id": "1d87ab3b-c3e2-434c-8aba-74a705f231e0"
+    }
+  ]
 }

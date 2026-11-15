@@ -39,7 +39,7 @@ async function api(request, env, url) {
   }
   let record;
   try { record = await env.DB.prepare('SELECT subscription FROM push_subscriptions WHERE device_key=?').bind(key).first(); }
-  catch (e) { console.error('HemoCare subscription lookup failed',e?.name,e?.message); return json({error:'Subscription lookup failed',stage:'subscription_lookup',reason:e?.name || 'UnknownError'},500); }
+  catch (e) { console.error('HemoCare subscription lookup failed',e?.name,e?.message); return json({error:'Subscription lookup failed',stage:'subscription_lookup',reason:e?.name || 'UnknownError',detail:String(e?.message || '').slice(0,240)},500); }
   if (!record) return json({error:'Enable notifications first'},409);
   if (url.pathname === '/api/reminders') {
     if (!Array.isArray(body?.reminders) || body.reminders.length > 200) return json({error:'Invalid reminders'},400);

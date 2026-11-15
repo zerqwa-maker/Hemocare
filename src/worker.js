@@ -1,4 +1,5 @@
 import * as webpush from 'web-push';
+import { createECDH } from 'node:crypto';
 
 const json = (data, status = 200) => Response.json(data, {status, headers: {'Cache-Control':'no-store'}});
 const isKey = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
@@ -18,7 +19,7 @@ async function api(request, env, url) {
     let databaseError = null;
     try { if (env.DB) { const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('hemocare_push_subscriptions_v2','hemocare_push_reminders_v2')").first(); databaseTables = Number(row?.n) === 2; } }
     catch (e) { databaseError = e?.name || 'DatabaseError'; }
-    return json({databaseConnected:!!env.DB,databaseTables,databaseError,vapidPublicKeyPresent:!!env.VAPID_PUBLIC_KEY,vapidPrivateKeyPresent:!!env.VAPID_PRIVATE_KEY,webpushSetVapidDetails:typeof webpush.setVapidDetails,webpushSendNotification:typeof webpush.sendNotification,storageVersion:2});
+    return json({databaseConnected:!!env.DB,databaseTables,databaseError,vapidPublicKeyPresent:!!env.VAPID_PUBLIC_KEY,vapidPrivateKeyPresent:!!env.VAPID_PRIVATE_KEY,webpushSetVapidDetails:typeof webpush.setVapidDetails,webpushSendNotification:typeof webpush.sendNotification,storageVersion:2,vapidKeyPairMatch:(()=>{try{const privateBytes=Buffer.from(env.VAPID_PRIVATE_KEY || '', 'base64url');const publicBytes=Buffer.from(env.VAPID_PUBLIC_KEY || '', 'base64url');if(privateBytes.length!==32 || publicBytes.length!==65)return false;const ecdh=createECDH('prime256v1');ecdh.setPrivateKey(privateBytes);return ecdh.getPublicKey().equals(publicBytes);}catch(e){console.error('VAPID pair verification failed',e?.name);return false;}})()});
   }
   if (url.pathname === '/api/health' && request.method === 'GET') return json({ok:true, app:'HemoCare', database:!!env.DB, vapidPublicKey:!!env.VAPID_PUBLIC_KEY, vapidPrivateKey:!!env.VAPID_PRIVATE_KEY, push:'configured'});
   if ((url.pathname === '/api/push-config' || url.pathname === '/api/push/public-key') && request.method === 'GET') return env.VAPID_PUBLIC_KEY ? json({publicKey:env.VAPID_PUBLIC_KEY}) : json({error:'Public key missing'},503);

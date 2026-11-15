@@ -37,7 +37,9 @@ async function api(request, env, url) {
     await env.DB.prepare('INSERT INTO push_subscriptions(device_key,subscription,updated_at) VALUES(?,?,?) ON CONFLICT(device_key) DO UPDATE SET subscription=excluded.subscription,updated_at=excluded.updated_at').bind(key,JSON.stringify(sub),Date.now()).run();
     return json({ok:true});
   }
-  const record = await env.DB.prepare('SELECT subscription FROM push_subscriptions WHERE device_key=?').bind(key).first();
+  let record;
+  try { record = await env.DB.prepare('SELECT subscription FROM push_subscriptions WHERE device_key=?').bind(key).first(); }
+  catch (e) { console.error('HemoCare subscription lookup failed',e?.name,e?.message); return json({error:'Subscription lookup failed',stage:'subscription_lookup',reason:e?.name || 'UnknownError'},500); }
   if (!record) return json({error:'Enable notifications first'},409);
   if (url.pathname === '/api/reminders') {
     if (!Array.isArray(body?.reminders) || body.reminders.length > 200) return json({error:'Invalid reminders'},400);
@@ -51,7 +53,7 @@ async function api(request, env, url) {
     return json({ok:true,count:items.length});
   }
   try {await send(env,JSON.parse(record.subscription),payload('analysis',true));return json({ok:true});}
-  catch(e) {console.error('HemoCare test push failed',e?.name,e?.message,e?.statusCode);if ([404,410].includes(e.statusCode)) await env.DB.prepare('DELETE FROM push_subscriptions WHERE device_key=?').bind(key).run();return json({error:'Push delivery failed',reason:e?.name || 'UnknownError',status:e.statusCode || null},502);}
+  catch(e) {console.error('HemoCare test push failed',e?.name,e?.message,e?.statusCode);if ([404,410].includes(e?.statusCode)) {try {await env.DB.prepare('DELETE FROM push_subscriptions WHERE device_key=?').bind(key).run();} catch(cleanupError) {console.error('Push subscription cleanup failed',cleanupError?.name,cleanupError?.message);}}return json({error:'Push delivery failed',stage:'push_delivery',reason:e?.name || 'UnknownError',status:e?.statusCode || null},502);}
 }
 export default {
   async fetch(request,env) {

@@ -13,6 +13,13 @@ async function send(env, subscription, message) {
   return webpush.sendNotification(subscription, JSON.stringify(message), {TTL: 3600});
 }
 async function api(request, env, url) {
+  if (url.pathname === '/api/push-diagnostics' && request.method === 'GET') {
+    let databaseTables = false;
+    let databaseError = null;
+    try { if (env.DB) { const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('push_subscriptions','push_reminders')").first(); databaseTables = Number(row?.n) === 2; } }
+    catch (e) { databaseError = e?.name || 'DatabaseError'; }
+    return json({databaseConnected:!!env.DB,databaseTables,databaseError,vapidPublicKeyPresent:!!env.VAPID_PUBLIC_KEY,vapidPrivateKeyPresent:!!env.VAPID_PRIVATE_KEY,webpushSetVapidDetails:typeof webpush.setVapidDetails,webpushSendNotification:typeof webpush.sendNotification});
+  }
   if (url.pathname === '/api/health' && request.method === 'GET') return json({ok:true, app:'HemoCare', database:!!env.DB, vapidPublicKey:!!env.VAPID_PUBLIC_KEY, vapidPrivateKey:!!env.VAPID_PRIVATE_KEY, push:'configured'});
   if ((url.pathname === '/api/push-config' || url.pathname === '/api/push/public-key') && request.method === 'GET') return env.VAPID_PUBLIC_KEY ? json({publicKey:env.VAPID_PUBLIC_KEY}) : json({error:'Public key missing'},503);
   if (!['/api/subscribe','/api/reminders','/api/test'].includes(url.pathname)) return null;

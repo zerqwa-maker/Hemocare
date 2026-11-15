@@ -51,13 +51,13 @@ async function api(request, env, url) {
     return json({ok:true,count:items.length});
   }
   try {await send(env,JSON.parse(record.subscription),payload('analysis',true));return json({ok:true});}
-  catch(e) {if ([404,410].includes(e.statusCode)) await env.DB.prepare('DELETE FROM push_subscriptions WHERE device_key=?').bind(key).run();return json({error:'Push delivery failed',status:e.statusCode || 502},502);}
+  catch(e) {console.error('HemoCare test push failed',e?.name,e?.message,e?.statusCode);if ([404,410].includes(e.statusCode)) await env.DB.prepare('DELETE FROM push_subscriptions WHERE device_key=?').bind(key).run();return json({error:'Push delivery failed',reason:e?.name || 'UnknownError',status:e.statusCode || null},502);}
 }
 export default {
   async fetch(request,env) {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api/')) {
-      try {return await api(request,env,url) || json({error:'Not found'},404);} catch(e) {console.error('HemoCare API error',e.message);return json({error:'Server error'},500);}
+      try {return await api(request,env,url) || json({error:'Not found'},404);} catch(e) {console.error('HemoCare API error',url.pathname,e?.name,e?.message);return json({error:'Server error',stage:url.pathname === '/api/test' ? 'test' : url.pathname === '/api/subscribe' ? 'subscribe' : url.pathname === '/api/reminders' ? 'reminders' : 'api',reason:e?.name || 'UnknownError'},500);}
     }
     return env.ASSETS.fetch(request);
   },

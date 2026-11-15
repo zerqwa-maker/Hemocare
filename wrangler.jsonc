@@ -11,7 +11,7 @@
     "binding": "ASSETS"
   },
   "vars": {
-    "VAPID_PUBLIC_KEY": "BONWczzI7LEhro9LLgb9AHfDwUKvEZdeqzM8q7WBvZJfjsCxJ5-_VQGHdSgxDsn3LrYjmoeAH40IyIzzUyyj_mg"
+    "VAPID_PUBLIC_KEY": "BB5p3bT4-SQDSG2dChWYbseFdvl4pI0wpfY8VFwjxBEWA4t22AcMYC2hlT4E_qnV4HWrRtMQd2lvkfBpVD-Ml88"
   },
   "d1_databases": [
     {

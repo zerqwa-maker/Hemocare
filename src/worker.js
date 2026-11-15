@@ -16,9 +16,9 @@ async function api(request, env, url) {
   if (url.pathname === '/api/push-diagnostics' && request.method === 'GET') {
     let databaseTables = false;
     let databaseError = null;
-    try { if (env.DB) { const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('push_subscriptions','push_reminders')").first(); databaseTables = Number(row?.n) === 2; } }
+    try { if (env.DB) { const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('hemocare_push_subscriptions_v2','hemocare_push_reminders_v2')").first(); databaseTables = Number(row?.n) === 2; } }
     catch (e) { databaseError = e?.name || 'DatabaseError'; }
-    return json({databaseConnected:!!env.DB,databaseTables,databaseError,vapidPublicKeyPresent:!!env.VAPID_PUBLIC_KEY,vapidPrivateKeyPresent:!!env.VAPID_PRIVATE_KEY,webpushSetVapidDetails:typeof webpush.setVapidDetails,webpushSendNotification:typeof webpush.sendNotification});
+    return json({databaseConnected:!!env.DB,databaseTables,databaseError,vapidPublicKeyPresent:!!env.VAPID_PUBLIC_KEY,vapidPrivateKeyPresent:!!env.VAPID_PRIVATE_KEY,webpushSetVapidDetails:typeof webpush.setVapidDetails,webpushSendNotification:typeof webpush.sendNotification,storageVersion:2});
   }
   if (url.pathname === '/api/health' && request.method === 'GET') return json({ok:true, app:'HemoCare', database:!!env.DB, vapidPublicKey:!!env.VAPID_PUBLIC_KEY, vapidPrivateKey:!!env.VAPID_PRIVATE_KEY, push:'configured'});
   if ((url.pathname === '/api/push-config' || url.pathname === '/api/push/public-key') && request.method === 'GET') return env.VAPID_PUBLIC_KEY ? json({publicKey:env.VAPID_PUBLIC_KEY}) : json({error:'Public key missing'},503);
@@ -34,11 +34,11 @@ async function api(request, env, url) {
   if (url.pathname === '/api/subscribe') {
     const sub = body?.subscription;
     if (!sub || typeof sub.endpoint !== 'string' || sub.endpoint.length > 2048 || !sub.endpoint.startsWith('https://') || !sub.keys || typeof sub.keys.p256dh !== 'string' || typeof sub.keys.auth !== 'string' || sub.keys.p256dh.length > 300 || sub.keys.auth.length > 200) return json({error:'Invalid subscription'},400);
-    await env.DB.prepare('INSERT INTO push_subscriptions(device_key,subscription,updated_at) VALUES(?,?,?) ON CONFLICT(device_key) DO UPDATE SET subscription=excluded.subscription,updated_at=excluded.updated_at').bind(key,JSON.stringify(sub),Date.now()).run();
+    await env.DB.prepare('INSERT INTO hemocare_push_subscriptions_v2(device_key,subscription,updated_at) VALUES(?,?,?) ON CONFLICT(device_key) DO UPDATE SET subscription=excluded.subscription,updated_at=excluded.updated_at').bind(key,JSON.stringify(sub),Date.now()).run();
     return json({ok:true});
   }
   let record;
-  try { record = await env.DB.prepare('SELECT subscription FROM push_subscriptions WHERE device_key=?').bind(key).first(); }
+  try { record = await env.DB.prepare('SELECT subscription FROM hemocare_push_subscriptions_v2 WHERE device_key=?').bind(key).first(); }
   catch (e) { console.error('HemoCare subscription lookup failed',e?.name,e?.message); return json({error:'Subscription lookup failed',stage:'subscription_lookup',reason:e?.name || 'UnknownError',detail:String(e?.message || '').slice(0,240)},500); }
   if (!record) return json({error:'Enable notifications first'},409);
   if (url.pathname === '/api/reminders') {
@@ -48,12 +48,12 @@ async function api(request, env, url) {
       if (typeof r.id !== 'string' || r.id.length > 100 || !['analysis','doctor','personal'].includes(r.kind) || typeof r.at !== 'string' || !/^\d{4}-\d\d-\d\dT/.test(r.at) || !Number.isFinite(Date.parse(r.at))) return json({error:'Invalid reminder'},400);
       items.push({id:r.id, kind:r.kind, at:Date.parse(r.at)});
     }
-    const statements = [env.DB.prepare('DELETE FROM push_reminders WHERE device_key=?').bind(key), ...items.filter(r=>r.at>Date.now()).map(r=>env.DB.prepare('INSERT INTO push_reminders(device_key,reminder_id,kind,due_at) VALUES(?,?,?,?)').bind(key,r.id,r.kind,r.at))];
+    const statements = [env.DB.prepare('DELETE FROM hemocare_push_reminders_v2 WHERE device_key=?').bind(key), ...items.filter(r=>r.at>Date.now()).map(r=>env.DB.prepare('INSERT INTO hemocare_push_reminders_v2(device_key,reminder_id,kind,due_at) VALUES(?,?,?,?)').bind(key,r.id,r.kind,r.at))];
     await env.DB.batch(statements);
     return json({ok:true,count:items.length});
   }
   try {await send(env,JSON.parse(record.subscription),payload('analysis',true));return json({ok:true});}
-  catch(e) {console.error('HemoCare test push failed',e?.name,e?.message,e?.statusCode);if ([404,410].includes(e?.statusCode)) {try {await env.DB.prepare('DELETE FROM push_subscriptions WHERE device_key=?').bind(key).run();} catch(cleanupError) {console.error('Push subscription cleanup failed',cleanupError?.name,cleanupError?.message);}}return json({error:'Push delivery failed',stage:'push_delivery',reason:e?.name || 'UnknownError',status:e?.statusCode || null},502);}
+  catch(e) {console.error('HemoCare test push failed',e?.name,e?.message,e?.statusCode);if ([404,410].includes(e?.statusCode)) {try {await env.DB.prepare('DELETE FROM hemocare_push_subscriptions_v2 WHERE device_key=?').bind(key).run();} catch(cleanupError) {console.error('Push subscription cleanup failed',cleanupError?.name,cleanupError?.message);}}return json({error:'Push delivery failed',stage:'push_delivery',reason:e?.name || 'UnknownError',status:e?.statusCode || null},502);}
 }
 export default {
   async fetch(request,env) {
@@ -67,14 +67,14 @@ export default {
     if (!env.DB) return;
     ctx.waitUntil((async()=>{
       const now=Date.now();
-      const {results=[]}=await env.DB.prepare('SELECT r.device_key,r.reminder_id,r.kind,s.subscription FROM push_reminders r JOIN push_subscriptions s ON s.device_key=r.device_key WHERE r.due_at<=? LIMIT 50').bind(now).all();
+      const {results=[]}=await env.DB.prepare('SELECT r.device_key,r.reminder_id,r.kind,s.subscription FROM hemocare_push_reminders_v2 r JOIN hemocare_push_subscriptions_v2 s ON s.device_key=r.device_key WHERE r.due_at<=? LIMIT 50').bind(now).all();
       for (const r of results) {
         try {
           await send(env,JSON.parse(r.subscription),payload(r.kind));
-          await env.DB.prepare('DELETE FROM push_reminders WHERE device_key=? AND reminder_id=?').bind(r.device_key,r.reminder_id).run();
+          await env.DB.prepare('DELETE FROM hemocare_push_reminders_v2 WHERE device_key=? AND reminder_id=?').bind(r.device_key,r.reminder_id).run();
         } catch(e) {
           console.error('Push delivery failed',e.statusCode || e.message);
-          if ([404,410].includes(e.statusCode)) await env.DB.prepare('DELETE FROM push_subscriptions WHERE device_key=?').bind(r.device_key).run();
+          if ([404,410].includes(e.statusCode)) await env.DB.prepare('DELETE FROM hemocare_push_subscriptions_v2 WHERE device_key=?').bind(r.device_key).run();
         }
       }
     })());

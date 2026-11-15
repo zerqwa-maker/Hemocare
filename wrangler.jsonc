@@ -18,5 +18,12 @@
       "database_name": "hemocare-db",
       "database_id": "1d87ab3b-c3e2-434c-8aba-74a705f231e0"
     }
-  ]
+   ],
+
+  "vars": {
+
+    "VAPID_PUBLIC_KEY": "BONWczzI7LEhro9LLgb9AHfDwUKvEZdeqzM8q7WBvZJfjsCxJ5-_VQGHdSgxDsn3LrYjmoeAH40IyIzzUyyj_mg"
+
+  }
+
 }

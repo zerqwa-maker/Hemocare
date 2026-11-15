@@ -1,5 +1,5 @@
 
-const CACHE = 'hemocare-v1-4-3-push';
+const CACHE = 'hemocare-v1-4-4-cloud-auto';
 
 const ASSETS = [
   './',
